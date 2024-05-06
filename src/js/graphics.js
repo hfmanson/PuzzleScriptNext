@@ -58,6 +58,86 @@ function createJsonSprite(name, vector) {
     return canvas;
 }
 
+// Create and return a SVG template sprite canvas
+function createSVGTemplateSprite(name, vector) {
+    var canvas = makeSpriteCanvas(name);
+    if (vector.w) canvas.width *= vector.w;
+    if (vector.h) canvas.height *= vector.h;
+    var context = canvas.getContext('2d');
+    const body = vector.data.join("\n");
+    const svg =
+`<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"  xmlns:xlink="http://www.w3.org/1999/xlink">
+<style type="text/css">
+    <![CDATA[
+    .E {
+        --rotation: 0deg;
+    }
+    .SE {
+        --rotation: 45deg;
+    }
+    .S {
+        --rotation: 90deg;
+    }
+    .SW {
+        --rotation: 135deg;
+    }
+    .W {
+        --rotation: 180deg;
+    }
+    .NW {
+        --rotation: -135deg;
+    }
+    .N {
+        --rotation: -90deg;
+    }
+    .NE {
+        --rotation: -45deg;
+    }
+    .red {
+        --arrow-color: red;
+    }
+    .lightgrey {
+        --arrow-color: lightgrey;
+    }
+    #arrow {
+        stroke-width: 12;
+        stroke-linecap: round;
+        transform-origin: 50px 50px;
+        stroke: var(--arrow-color);
+        transform: rotate(var(--rotation));
+    }
+    #player {
+        stroke: blue;
+        fill: transparent;
+        stroke-width: 5;
+    }
+    #goal {
+        stroke: blue;
+        stroke-dasharray: 5;
+        fill: transparent;
+        stroke-width: 3;
+    }
+    ]]>
+</style>
+<defs>
+    <path id="arrow" d="M 20 50 L 80 50 M 60 30 L 80 50 M 60 70 L 80 50"/>
+    <rect id="player" x="5" y="5" width="90" height="90"/>
+    <rect id="goal" x="5" y="5" width="90" height="90"/>
+</defs>
+${body}
+</svg>`;
+    var blob = new Blob([svg], {type: 'image/svg+xml'});
+    var url = URL.createObjectURL(blob);
+    var image = document.createElement('img');
+    image.src = url;
+    image.addEventListener('load', function () {
+        context.drawImage(image, 0, 0);
+        URL.revokeObjectURL(url);
+        redraw();
+    }, false);
+    return canvas;
+}
+
 // draw the pixels of the sprite grid data into the context at a cell position, 
 function renderSprite(context, spritegrid, colors, padding, x, y, size) {
     colors ||= ['#00000000', state.fgcolor];
@@ -131,8 +211,9 @@ var editor_s_grille=[[0,1,1,1,0],[1,0,0,0,0],[0,1,1,1,0],[0,0,0,0,1],[0,1,1,1,0]
 var spriteImages;
 
 function createVectorSprite(name, vector) {
-    return vector.type == 'canvas' ? createJsonSprite(name, vector)
-        : null;
+    return vector.type === 'canvas' ? createJsonSprite(name, vector)
+    : vector.type === 'svg' ? createSVGTemplateSprite(name, vector)
+    : null;
 }
 
 function regenSpriteImages() {

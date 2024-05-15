@@ -415,6 +415,8 @@ function generateGlyphImages() {
 var canvas;
 var ctx;
 
+var svg;
+var svggame;
 
 var x;
 var y;
@@ -428,6 +430,8 @@ let pixelSize;
 window.addEventListener('resize', (e) => canvasResize(), false);
 canvas = document.getElementById('gameCanvas');
 ctx = canvas.getContext('2d');
+svg = document.getElementById('SVGCanvas');
+
 x = 0;
 y = 0;
 
@@ -436,15 +440,24 @@ function glyphCount() {
     return state.glyphOrder.filter(g => g.length == 1).length;
 }
 
+var redrawn = false;
 function redraw() {
     if (cellwidth===0||cellheight===0) {
         return;
     }
     if (debugSwitch.includes('perf')) console.log(`Redraw: ${JSON.stringify(perfCounters)}`);
 
-    if (textMode)
+    if (textMode) {
+        canvas.setAttribute("style", "display: block");
+        svg.setAttribute("style", "display: none");
         redrawTextMode();
-    else redrawCellGrid(curLevel);
+        redrawn = false;
+    } else if (!redrawn) {
+        canvas.setAttribute("style", "display: none");
+        svg.setAttribute("style", "display: block; background: " + state.bgcolor);
+        redrawCellGrid(curLevel);
+        redrawn = true;
+    }
 }
 
 // option to draw custom font text in cells could be a prelude setting if desired
@@ -504,7 +517,7 @@ function redrawCellGrid(curlevel) {
     }
     ctx.fillStyle = state.bgcolor;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-
+    svg.setAttribute("viewBox", "0 0 " + curlevel.width + " " + curlevel.height);
     let minMaxIJ = [ 0, 0, screenwidth, screenheight ];
 
     var cameraOffset = {
@@ -628,7 +641,8 @@ function redrawCellGrid(curlevel) {
             };
             return {
                 x: xoffset + (ij.x - this.minMax[0]-cameraOffset.x) * cellwidth + offs.x * ~~(cellwidth / state.sprite_size),
-                y: yoffset + (ij.y - this.minMax[1]-cameraOffset.y) * cellheight + offs.y * ~~(cellheight / state.sprite_size)
+                y: yoffset + (ij.y - this.minMax[1]-cameraOffset.y) * cellheight + offs.y * ~~(cellheight / state.sprite_size),
+                xy: ij
             };
 
         }
@@ -674,6 +688,14 @@ function redrawCellGrid(curlevel) {
             pivotx: 0.0, // todo
             pivoty: 1.0 
         } : null;
+        if (svg.childElementCount == 0) {
+            const newsvg = document.importNode(state.svgelement, true);
+            svg.append(...newsvg.childNodes);
+            svggame = document.getElementById('SVGgame');            
+        }
+        
+        svggame.replaceChildren();
+        const parser = new DOMParser();
 
         // draw each group of objects in all the places they occur, in specified order
         for (const group of state.collisionLayerGroups) {
@@ -710,6 +732,15 @@ function redrawCellGrid(curlevel) {
                             };
                             params.x = vector.x || 0;
                             params.y = vector.y || 0;
+                            if (vector.type === 'svg') {
+                                const doc = parser.parseFromString('<svg>' + obj.vector.data[0] + '</svg>', "text/html");
+                                const el = doc.body.childNodes[0].childNodes[0];
+                                el.setAttribute("x", drawpos.xy.x);
+                                el.setAttribute("y", drawpos.xy.y);
+                                const el2 = document.importNode(el);
+                                svggame.appendChild(el2);
+                            }
+                
                         } else {
                             spriteSize = {
                                 w: obj.spritematrix.reduce((acc, row) => Math.max(acc, row.length), 0) * pixelSize,
@@ -738,6 +769,15 @@ function redrawCellGrid(curlevel) {
                         }
                         ctx.globalAlpha = 1;
                         ctx.setTransform(1, 0, 0, 1, 0, 0);
+                        if (!vector) {
+                            const imgURL = spriteImages[k].toDataURL("image/png");
+                            const doc = parser.parseFromString('<svg><image width="1.01px" height="1.01px" xlink:href="' + imgURL + '"/></svg>', "text/html");
+                            const el = doc.body.childNodes[0].childNodes[0];
+                            el.setAttribute("x", drawpos.xy.x);
+                            el.setAttribute("y", drawpos.xy.y);
+                            const el2 = document.importNode(el);
+                            svggame.appendChild(el2);    
+                        }
                     }
                 }
             }
@@ -1079,6 +1119,8 @@ function canvasResize(level) {
     level ||= curLevel;
     canvas.width = canvas.parentNode.clientWidth;
     canvas.height = canvas.parentNode.clientHeight;
+    svg.setAttribute("width", svg.parentNode.clientWidth);
+    svg.setAttribute("height", svg.parentNode.clientHeight);
 
     screenwidth = level.width;        // board size, used to calculate cell size
     screenheight = level.height;

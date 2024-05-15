@@ -189,7 +189,7 @@ if (typeof Object.assign != 'function') {
 var codeMirrorFn = function() {
     'use strict';
 
-    const sectionNames = ['objects', 'legend', 'sounds', 'collisionlayers', 'rules', 'winconditions', 'tags', 'mappings', 'levels'];
+    const sectionNames = ['objects', 'legend', 'sounds', 'collisionlayers', 'rules', 'winconditions', 'tags', 'mappings', 'levels', 'svg'];
     const reg_equalsrow = /[\=]+/;
     const reg_soundevents = /^(sfx\d+|undo|restart|titlescreen|startgame|cancel|endgame|startlevel|endlevel|showmessage|closemessage|pausescreen)\b/i;
 
@@ -1719,6 +1719,27 @@ var codeMirrorFn = function() {
         }
     }
 
+    function parseSVG(stream, state) {
+        const lexer = new Lexer(stream, state);
+        if (!state.svgsource) state.svgsource = '';
+        getTokens();
+        return lexer.tokens;
+
+        // build a list of tokens and kinds, and extract values
+        function getTokens() {
+            let kind = 'ERROR';
+            let token;
+            while (!lexer.matchEol()) {
+                // TODO: check svg syntax
+                kind = 'SPRITEMATRIX';
+                token = lexer.matchAll();
+                state.svgsource += token;
+                lexer.pushToken(token, kind);
+            }
+            return true;
+        }
+    }
+
     ////////////////////////////////////////////////////////////////////////////
     // called as per CodeMirror API
     // return value is an object containing a specific set of named functions
@@ -2027,6 +2048,11 @@ var codeMirrorFn = function() {
                 case 'levels': {
                     stream.string = mixedCase;
                     state.current_line_wip_array = parseLevel(stream, state);
+                    return flushToken();
+                }
+                case 'svg': {
+                    stream.string = mixedCase;
+                    state.current_line_wip_array = parseSVG(stream, state);
                     return flushToken();
                 }
                         

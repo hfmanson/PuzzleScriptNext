@@ -749,7 +749,7 @@ function onKeyDown(event) {
     	return;
     }
 
-    if(lastDownTarget === canvas || (window.Mobile && (lastDownTarget === window.Mobile.focusIndicator) ) ){
+    if(lastDownTarget === canvas || lastDownTarget === svg || (window.Mobile && (lastDownTarget === window.Mobile.focusIndicator) ) ){
     	if (keybuffer.indexOf(event.keyCode)===-1) {
     		if (event&&(event.ctrlKey || event.metaKey)){
 		    } else {
@@ -1179,6 +1179,7 @@ function checkKey(e,justPressed) {
             if (!textMode) {
                 pushInput("undo");
                 DoUndo(false,true);
+				redrawn = false;
                 canvasResize(); // calls redraw
             	return prevent(e);
             }
@@ -1404,6 +1405,7 @@ function checkKey(e,justPressed) {
             } else {
                 pushInput(inputdir);
                 if (processInput(inputdir)) {
+					redrawn = false;
                     redraw();
                 }
 	        }

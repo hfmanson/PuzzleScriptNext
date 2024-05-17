@@ -29,115 +29,6 @@ function createTextSprite(name, text, colors, scale) {
     return canvas;
 }
 
-// Create and return a custom instructions sprite canvas
-function createJsonSprite(name, vector) {
-    const canvas = makeSpriteCanvas(name);
-    const context = canvas.getContext('2d');
-    //let lastinstr;
-
-    if (vector.w) canvas.width *= vector.w;
-    if (vector.h) canvas.height *= vector.h;
-    const json = vector.data;
-    context.scale(cellwidth, cellheight);
-    for (const instr of json) {
-        try {
-            for (const [key, value] of Object.entries(instr)) {
-                if (context[key] instanceof Function) {
-                    context[key].apply(context, value);
-                } else {
-                    context[key] = value;
-                }
-            }
-        } catch (error) { // does this ever happen???
-            console.log(error);
-            logErrorNoLine(`Oops! Looks like there's something wrong with this bit of JSON: "${JSON.stringify(instr)}"`, true);
-            logErrorNoLine(`The system returned this error message: ${error}`, true);
-            return canvas;
-        }
-    }
-    return canvas;
-}
-
-// Create and return a SVG template sprite canvas
-function createSVGTemplateSprite(name, vector) {
-    var canvas = makeSpriteCanvas(name);
-    if (vector.w) canvas.width *= vector.w;
-    if (vector.h) canvas.height *= vector.h;
-    var context = canvas.getContext('2d');
-    const body = vector.data.join("\n");
-    const svg =
-`<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"  xmlns:xlink="http://www.w3.org/1999/xlink">
-<style type="text/css">
-    <![CDATA[
-    .E {
-        --rotation: 0deg;
-    }
-    .SE {
-        --rotation: 45deg;
-    }
-    .S {
-        --rotation: 90deg;
-    }
-    .SW {
-        --rotation: 135deg;
-    }
-    .W {
-        --rotation: 180deg;
-    }
-    .NW {
-        --rotation: -135deg;
-    }
-    .N {
-        --rotation: -90deg;
-    }
-    .NE {
-        --rotation: -45deg;
-    }
-    .red {
-        --arrow-color: red;
-    }
-    .lightgrey {
-        --arrow-color: lightgrey;
-    }
-    #arrow {
-        stroke-width: 12;
-        stroke-linecap: round;
-        transform-origin: 50px 50px;
-        stroke: var(--arrow-color);
-        transform: rotate(var(--rotation));
-    }
-    #player {
-        stroke: blue;
-        fill: transparent;
-        stroke-width: 5;
-    }
-    #goal {
-        stroke: blue;
-        stroke-dasharray: 5;
-        fill: transparent;
-        stroke-width: 3;
-    }
-    ]]>
-</style>
-<defs>
-    <path id="arrow" d="M 20 50 L 80 50 M 60 30 L 80 50 M 60 70 L 80 50"/>
-    <rect id="player" x="5" y="5" width="90" height="90"/>
-    <rect id="goal" x="5" y="5" width="90" height="90"/>
-</defs>
-${body}
-</svg>`;
-    var blob = new Blob([svg], {type: 'image/svg+xml'});
-    var url = URL.createObjectURL(blob);
-    var image = document.createElement('img');
-    image.src = url;
-    image.addEventListener('load', function () {
-        context.drawImage(image, 0, 0);
-        URL.revokeObjectURL(url);
-        redraw();
-    }, false);
-    return canvas;
-}
-
 // draw the pixels of the sprite grid data into the context at a cell position, 
 function renderSprite(context, spritegrid, colors, padding, x, y, size) {
     colors ||= ['#00000000', state.fgcolor];
@@ -208,17 +99,17 @@ function regenText() {
 
 var editor_s_grille=[[0,1,1,1,0],[1,0,0,0,0],[0,1,1,1,0],[0,0,0,0,1],[0,1,1,1,0]];
 
-var spriteImages;
+var spriteImages = [];
+var spriteBlobs = [];
 
-function createVectorSprite(name, vector) {
-    return vector.type === 'canvas' ? createJsonSprite(name, vector)
-    : vector.type === 'svg' ? createSVGTemplateSprite(name, vector)
-    : null;
-}
-
-function regenSpriteImages() {
+async function regenSpriteImages() {
 	if (textMode) {
         spriteImages = [];
+        spriteBlobs.forEach((url) => {
+            console.log("freeing blob: " + url);
+            URL.revokeObjectURL(url);
+        });
+        spriteBlobs = [];
 		regenText();
 		return;
 	} 
@@ -232,14 +123,32 @@ function regenSpriteImages() {
     }
     spriteImages = [];
     
-    objectSprites.forEach((s,i) => {
+    let i = 0;
+    for (const s of objectSprites) {
         if (s) {
             spriteImages[i] =
                 s.text ? createTextSprite('t' + s.text, s.text, s.colors, s.scale)
-                : s.vector ? createVectorSprite(i.toString(), s.vector)
                 : createSprite(i.toString(), s.dat, s.colors, state.sprite_size);
+            if (!s.vector && !s.text) {
+                const blob = await new Promise(resolve => spriteImages[i].toBlob(resolve));
+                spriteBlobs[i] = URL.createObjectURL(blob);
+                console.log("spriteBlobs[" + i + "] = " + spriteBlobs[i]);
+            }
         }
-    });
+        i++;
+    }
+    // objectSprites.forEach(async (s,i) => {
+    //     if (s) {
+    //         spriteImages[i] =
+    //             s.text ? createTextSprite('t' + s.text, s.text, s.colors, s.scale)
+    //             : createSprite(i.toString(), s.dat, s.colors, state.sprite_size);
+    //         if (!s.vector && !s.text) {
+    //             const blob = await new Promise(resolve => spriteImages[i].toBlob(resolve));
+    //             spriteBlobs[i] = URL.createObjectURL(blob);
+    //             console.log("spriteBlobs[" + i + "] = " + spriteBlobs[i]);
+    //         }
+    //     }
+    // });
 
     if (canOpenEditor) {
     	generateGlyphImages();
@@ -301,7 +210,9 @@ function generateGlyphImages() {
 				if (id===-1) {
 					continue;
                 }
-				spritectx.drawImage(spriteImages[id], 0, 0);
+                if (spriteImages[id]) {
+                    spritectx.drawImage(spriteImages[id], 0, 0);
+                }
 			}
 			glyphImages.push(sprite);
 		}
@@ -677,17 +588,19 @@ function redrawCellGrid(curlevel) {
     //----- functions -----
     // Default draw loop, including when animating
     function drawObjects(render) {
-        showLayerNo = Math.max(0, Math.min(curlevel.layerCount - 1, showLayerNo));
-        const tween = 1 - clamp(tweentimer/animateinterval, 0, 1);  // range 1 => 0
-        if (tween == 0) 
-            seedsToAnimate = {};
+        function appendSVG(source, xy) {
+            const doc = parser.parseFromString(source, "text/html");
+            const el = doc.body.firstElementChild.firstElementChild;
+            el.setAttribute("x", xy.x);
+            el.setAttribute("y", xy.y);
+            const el2 = document.importNode(el);
+            el2.addEventListener("load", (e) => {
+                const href = e.target.getAttribute("xlink:href");
+                console.log("blob loaded: " + href);
+            }, false);
+            svggame.appendChild(el2);
+        }
 
-        // Decision required whether to follow P:S pivot (top left)
-        const spriteScaler = state.metadata.sprite_size ? { 
-            scale: state.sprite_size, 
-            pivotx: 0.0, // todo
-            pivoty: 1.0 
-        } : null;
         if (svg.childElementCount == 0) {
             const newsvg = document.importNode(state.svgelement, true);
             svg.append(...newsvg.childNodes);
@@ -708,75 +621,16 @@ function redrawCellGrid(curlevel) {
                         if (showLayers && obj.layer != showLayerNo)
                             continue;
 
-                        let spriteScale = 1;
-                        //if (spriteScaler) spriteScale *= Math.max(obj.spritematrix.length, obj.spritematrix[0].length) / spriteScaler.scale;
-                        //if (obj.scale) spriteScale *= obj.scale;
                         const drawpos = render.getDrawPos(posindex, obj);
                         
-                        let params = {
-                            x: 0, y: 0,
-                            scalex: 1.0, scaley: 1.0,
-                            alpha: 1.0,                                
-                            angle: 0.0,                                
-                        };
-                        if (animate) 
-                            params = calcAnimate(animate.seed.split(':').slice(1), animate.kind, animate.dir, params, tween);
-
-                        // size of the sprite in pixels
-                        let spriteSize;
                         const vector = obj.vector;
                         if (vector) {
-                            spriteSize = {
-                                w: (vector.w || 1) * cellwidth,
-                                h: (vector.h || 1) * cellheight,
-                            };
-                            params.x = vector.x || 0;
-                            params.y = vector.y || 0;
                             if (vector.type === 'svg') {
-                                const doc = parser.parseFromString('<svg>' + obj.vector.data[0] + '</svg>', "text/html");
-                                const el = doc.body.childNodes[0].childNodes[0];
-                                el.setAttribute("x", drawpos.xy.x);
-                                el.setAttribute("y", drawpos.xy.y);
-                                const el2 = document.importNode(el);
-                                svggame.appendChild(el2);
-                            }
-                
+                                appendSVG('<svg>' + obj.vector.data[0] + '</svg>', drawpos.xy);
+                            }                
                         } else {
-                            spriteSize = {
-                                w: obj.spritematrix.reduce((acc, row) => Math.max(acc, row.length), 0) * pixelSize,
-                                h: obj.spritematrix.length * pixelSize,
-                            };
-                        }
-                        // calculate the destination rectangle
-                        const rc = { 
-                            x: Math.floor(drawpos.x + params.x * cellwidth), 
-                            y: Math.floor(drawpos.y + params.y * cellheight),
-                            w: params.scalex * spriteSize.w * spriteScale, 
-                            h: params.scaley * spriteSize.h * spriteScale 
-                        };
-                        //console.log(`draw obj:${state.idDict[k]} dp,sz,rc:`, drawpos, spriteSize, rc);
-                        ctx.globalAlpha = params.alpha;
-                        if (params.angle != 0) {
-                            ctx.translate(rc.x + rc.w/2, rc.y + rc.h/2);
-                            ctx.rotate(params.angle * Math.PI / 180);
-                            ctx.drawImage(
-                                spriteImages[k], 0, 0, spriteSize.w, spriteSize.h, 
-                                -rc.w/2, -rc.h/2, rc.w, rc.h);
-                        } else{
-                            ctx.drawImage(
-                                spriteImages[k], 0, 0, spriteSize.w, spriteSize.h, 
-                                rc.x, rc.y, rc.w, rc.h);
-                        }
-                        ctx.globalAlpha = 1;
-                        ctx.setTransform(1, 0, 0, 1, 0, 0);
-                        if (!vector) {
-                            const imgURL = spriteImages[k].toDataURL("image/png");
-                            const doc = parser.parseFromString('<svg><image width="1.01px" height="1.01px" xlink:href="' + imgURL + '"/></svg>', "text/html");
-                            const el = doc.body.childNodes[0].childNodes[0];
-                            el.setAttribute("x", drawpos.xy.x);
-                            el.setAttribute("y", drawpos.xy.y);
-                            const el2 = document.importNode(el);
-                            svggame.appendChild(el2);    
+                            //const imgURL = spriteImages[k].toDataURL("image/png");
+                            appendSVG('<svg><image width="1.01px" height="1.01px" xlink:href="' + spriteBlobs[k] + '"/></svg>', drawpos.xy);
                         }
                     }
                 }
@@ -1115,7 +969,7 @@ var textcellheight = 0;
 let statusLineHeight = 0;
 
 // recalculate screen layout and then call redraw
-function canvasResize(level) {
+async function canvasResize(level) {
     level ||= curLevel;
     canvas.width = canvas.parentNode.clientWidth;
     canvas.height = canvas.parentNode.clientHeight;
@@ -1204,7 +1058,8 @@ function canvasResize(level) {
     
     if (oldcellwidth!=cellwidth||oldcellheight!=cellheight||oldtextmode!=textMode||textMode||oldfgcolor!=state.fgcolor||forceRegenImages){
     	forceRegenImages=false;
-    	regenSpriteImages();
+    	await regenSpriteImages();
+        console.log("blobs loaded");
     }
 
     oldcellheight=cellheight;

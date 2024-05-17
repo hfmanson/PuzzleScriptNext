@@ -3080,6 +3080,7 @@ function procInp(dir,dontDoWin,dontModify,bak,coord) {
 				//  consolePrint('=======================');
 				consolePrint(`Turn starts with input of ${dirName}.`, false, null, inspect_ID);
 			}
+			redrawn = false;
 			consolePrint('Applying rules.');
 		}
 		

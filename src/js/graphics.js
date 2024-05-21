@@ -2,15 +2,15 @@
 
 // Create and return a graphic sprite canvas
 function createSprite(name,spritegrid, colors, size) {
-	colors ||= [state.bgcolor, state.fgcolor];
+    if (!colors || colors.length === 0)	colors = [state.bgcolor, state.fgcolor];
 
 	var canvas = makeSpriteCanvas(name);
 	var context = canvas.getContext('2d');
 
-    canvas.width = spritegrid.reduce((acc, row) => Math.max(acc, row.length), 0) * pixelSize;
-    canvas.height = spritegrid.length * pixelSize;
+    canvas.width = spritegrid.reduce((acc, row) => Math.max(acc, row.length), 0);
+    canvas.height = spritegrid.length;
 
-    renderSprite(context, spritegrid, colors, 0, 0, 0, size);
+    renderSpriteSVG(context, spritegrid, colors, 0, 0, 0, size);
 
     return canvas;
 }
@@ -54,6 +54,44 @@ function renderSprite(context, spritegrid, colors, padding, x, y, size) {
             }            
         });
     });
+}
+
+function renderSpriteSVG(context, spritegrid, colors, padding, x, y, size) {
+    const rc = { 
+        x: x * cellwidth, // global
+        y: y * cellheight, 
+        w: size || spritegrid[0].length, 
+        h: size || spritegrid.length,
+    };
+
+    const arr = new Uint8ClampedArray(rc.w * rc.h * 4);
+
+    let i = 0;
+    for (row of spritegrid) {
+        for (col of row) {
+            if (col >= 0) {
+                const color = colors[col];
+                if (color === "transparent") {
+                    arr[i + 3] = 0; // A value
+                } else {
+                    const [r, g, b] = colors[col].match(/\w\w/g).map(x => parseInt(x, 16));
+                    arr[i + 0] = r; // R value
+                    arr[i + 1] = g; // G value
+                    arr[i + 2] = b; // B value
+                    arr[i + 3] = 255; // A value    
+                }
+            } else {
+                arr[i + 3] = 0; // A value
+            }       
+            i += 4;
+        }
+    }
+
+    // Initialize a new ImageData object
+    const imageData = new ImageData(arr, rc.w, rc.h);
+
+    // Draw image data to the canvas
+    context.putImageData(imageData, 0, 0);
 }
 
 function drawTextWithFont(ctx, text, color, x, y, height) {
@@ -588,14 +626,94 @@ function redrawCellGrid(curlevel) {
     //----- functions -----
     // Default draw loop, including when animating
     function drawObjects(render) {
+        const namespaces = {
+			"svg": "http://www.w3.org/2000/svg",
+            "xlink": "http://www.w3.org/1999/xlink"
+		};
+        function colorToRGB(rgbaColor) {
+            const tmp = rgbaColor.match(/^rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*(\d+))?\)$/);
+            const rgba = [
+                tmp[1],
+                tmp[2],
+                tmp[3],
+            ];
+            // add opacity if present
+            if (tmp[4]) {
+                rgba.push(tmp[4]);
+            }
+            return rgba;
+        }
+        function getColor(el, attr) {
+            return colorToRGB(getComputedStyle(el).getPropertyValue(attr));
+        }
+        function replaceRects() {
+            const resolver = function (prefix) {
+                return namespaces[prefix];
+            }
+            const allRects = document.evaluate('svg:rect', svggame, resolver, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+            const wallcolor = allRects.snapshotItem(1).getAttribute("fill");
+            const [rb, gb, bb ] = getColor(allRects.snapshotItem(0), "fill");	
+            const [rf, gf, bf] = getColor(allRects.snapshotItem(1), "fill");
+            const result = document.evaluate('svg:rect[@fill="' + wallcolor + '"]', svggame, resolver, XPathResult.ORDERED_NODE_ITERATOR_TYPE, null);
+            const pointlists = [];
+            let rect;
+            while (rect = result.iterateNext()) {
+                pointlists.push(
+                    {
+                        "x": parseInt(rect.getAttribute("x")),
+                        "y": parseInt(rect.getAttribute("y"))
+                    });
+            }
+            const width = svg.viewBox.baseVal.width;
+            const height = svg.viewBox.baseVal.height;
+            const arr = new Uint8ClampedArray(width * height * 4);
+            let i = 0;
+            let pointidx = 0;
+            for (let row = 0; row < height; row++) {
+                for (let col = 0; col < width; col++) {
+                    const point = pointlists[pointidx];
+                    if (point.y === row && point.x === col) {
+                        arr[i + 0] = rf; // R value
+                        arr[i + 1] = gf; // G value
+                        arr[i + 2] = bf; // B value
+                        pointidx++;
+                    } else {
+                        arr[i + 0] = rb; // R value
+                        arr[i + 1] = gb; // G value
+                        arr[i + 2] = bb; // B value
+                    }
+                    arr[i + 3] = 255; // A value 
+                    i += 4;
+                }
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const context = canvas.getContext('2d');
+            // Initialize a new ImageData object
+            const imageData = new ImageData(arr, width, height);
+
+            // Draw image data to the canvas
+            context.putImageData(imageData, 0, 0);
+            const url = canvas.toDataURL();
+            console.log(url);
+            const image = document.createElementNS(namespaces.svg, "image");
+            image.setAttributeNS(namespaces.xlink, "href", url);
+            for (i = 0; i < allRects.snapshotLength; i++) {
+                svggame.removeChild(allRects.snapshotItem(i));
+            }
+            svggame.prepend(image);
+        }
+        const svg_prefix = '<svg xmlns="' + namespaces.svg + '" xmlns:xlink="' + namespaces.xlink + '">';
+        const svg_postfix = '</svg>';
         function appendSVG(source, xy) {
-            const doc = parser.parseFromString(source, "text/html");
-            const el = doc.body.firstElementChild.firstElementChild;
+            const doc = parser.parseFromString(svg_prefix + source + svg_postfix, "application/xml");
+            const el = doc.documentElement.firstElementChild;
             el.setAttribute("x", xy.x);
             el.setAttribute("y", xy.y);
             const el2 = document.importNode(el);
             el2.addEventListener("load", (e) => {
-                const href = e.target.getAttribute("xlink:href");
+                const href = e.target.getAttributeNS(namespaces.xlink, "href");
                 console.log("blob loaded: " + href);
             }, false);
             svggame.appendChild(el2);
@@ -626,16 +744,17 @@ function redrawCellGrid(curlevel) {
                         const vector = obj.vector;
                         if (vector) {
                             if (vector.type === 'svg') {
-                                appendSVG('<svg>' + obj.vector.data[0] + '</svg>', drawpos.xy);
+                                appendSVG(obj.vector.data[0], drawpos.xy);
                             }                
                         } else {
                             //const imgURL = spriteImages[k].toDataURL("image/png");
-                            appendSVG('<svg><image width="1.01px" height="1.01px" xlink:href="' + spriteBlobs[k] + '"/></svg>', drawpos.xy);
+                            appendSVG('<image width="1px" height="1px" xlink:href="' + spriteBlobs[k] + '"/>', drawpos.xy);
                         }
                     }
                 }
             }
         }
+        replaceRects();
     } 
 
     // update animation parameters based on kind and dir, based on tween curve

@@ -365,7 +365,6 @@ var canvas;
 var ctx;
 
 var svg;
-var svggame;
 
 var x;
 var y;
@@ -646,15 +645,15 @@ function redrawCellGrid(curlevel) {
         function getColor(el, attr) {
             return colorToRGB(getComputedStyle(el).getPropertyValue(attr));
         }
-        function replaceRects() {
+        function replaceRects(layerElement) {
             const resolver = function (prefix) {
                 return namespaces[prefix];
             }
-            const allRects = document.evaluate('svg:rect', svggame, resolver, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+            const allRects = document.evaluate('svg:rect', layerElement, resolver, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
             const wallcolor = allRects.snapshotItem(1).getAttribute("fill");
             const [rb, gb, bb ] = getColor(allRects.snapshotItem(0), "fill");	
             const [rf, gf, bf] = getColor(allRects.snapshotItem(1), "fill");
-            const result = document.evaluate('svg:rect[@fill="' + wallcolor + '"]', svggame, resolver, XPathResult.ORDERED_NODE_ITERATOR_TYPE, null);
+            const result = document.evaluate('svg:rect[@fill="' + wallcolor + '"]', layerElement, resolver, XPathResult.ORDERED_NODE_ITERATOR_TYPE, null);
             const pointlists = [];
             let rect;
             while (rect = result.iterateNext()) {
@@ -700,13 +699,13 @@ function redrawCellGrid(curlevel) {
             const image = document.createElementNS(namespaces.svg, "image");
             image.setAttributeNS(namespaces.xlink, "href", url);
             for (i = 0; i < allRects.snapshotLength; i++) {
-                svggame.removeChild(allRects.snapshotItem(i));
+                layerElement.removeChild(allRects.snapshotItem(i));
             }
-            svggame.prepend(image);
+            layerElement.prepend(image);
         }
         const svg_prefix = '<svg xmlns="' + namespaces.svg + '" xmlns:xlink="' + namespaces.xlink + '">';
         const svg_postfix = '</svg>';
-        function appendSVG(source, xy) {
+        function appendSVG(g, source, xy) {
             const doc = parser.parseFromString(svg_prefix + source + svg_postfix, "application/xml");
             const el = doc.documentElement.firstElementChild;
             el.setAttribute("x", xy.x);
@@ -716,20 +715,28 @@ function redrawCellGrid(curlevel) {
                 const href = e.target.getAttributeNS(namespaces.xlink, "href");
                 console.log("blob loaded: " + href);
             }, false);
-            svggame.appendChild(el2);
+            g.appendChild(el2);
         }
 
         if (svg.childElementCount == 0) {
             const newsvg = document.importNode(state.svgelement, true);
             svg.append(...newsvg.childNodes);
-            svggame = document.getElementById('SVGgame');            
         }
         
-        svggame.replaceChildren();
         const parser = new DOMParser();
 
         // draw each group of objects in all the places they occur, in specified order
         for (const group of state.collisionLayerGroups) {
+            let layerElement = document.getElementById('layer' + group.layer);
+            if (!layerElement) {
+                layerElement = document.createElementNS(namespaces.svg, "g");
+                layerElement.setAttribute("id", 'layer' + group.layer);
+                svg.append(layerElement);
+            } else if (group.layer === 0) {
+                continue;
+            } else {
+                layerElement.replaceChildren();
+            }
             for (const posindex of render.getPosIndexes(group)) {
                 const posmask = curlevel.getCellInto(posindex,_o12);    
                 for (let k = group.firstObjectNo; k < group.firstObjectNo + group.numObjects; ++k) {
@@ -738,23 +745,24 @@ function redrawCellGrid(curlevel) {
                         const obj = state.objects[state.idDict[k]];
                         if (showLayers && obj.layer != showLayerNo)
                             continue;
-
                         const drawpos = render.getDrawPos(posindex, obj);
                         
                         const vector = obj.vector;
                         if (vector) {
                             if (vector.type === 'svg') {
-                                appendSVG(obj.vector.data[0], drawpos.xy);
+                                appendSVG(layerElement, obj.vector.data[0], drawpos.xy);
                             }                
                         } else {
                             //const imgURL = spriteImages[k].toDataURL("image/png");
-                            appendSVG('<image width="1px" height="1px" xlink:href="' + spriteBlobs[k] + '"/>', drawpos.xy);
+                            appendSVG(layerElement, '<image width="1px" height="1px" xlink:href="' + spriteBlobs[k] + '"/>', drawpos.xy);
                         }
                     }
                 }
             }
+            if (group.layer === 0) {
+                replaceRects(layerElement);
+            }
         }
-        replaceRects();
     } 
 
     // update animation parameters based on kind and dir, based on tween curve

@@ -629,21 +629,15 @@ function redrawCellGrid(curlevel) {
 			"svg": "http://www.w3.org/2000/svg",
             "xlink": "http://www.w3.org/1999/xlink"
 		};
-        function colorToRGB(rgbaColor) {
-            const tmp = rgbaColor.match(/^rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*(\d+))?\)$/);
-            const rgba = [
-                tmp[1],
-                tmp[2],
-                tmp[3],
-            ];
-            // add opacity if present
-            if (tmp[4]) {
-                rgba.push(tmp[4]);
+        function colorToRGBA(rgbaColor) {
+            const rgba = rgbaColor.match(/^rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*(\d+))?\)$/);
+            if (!rgba[4]) {
+                rgba[4] = "255";
             }
-            return rgba;
+            return rgba.slice(1).map(x => parseInt(x));
         }
         function getColor(el, attr) {
-            return colorToRGB(getComputedStyle(el).getPropertyValue(attr));
+            return colorToRGBA(getComputedStyle(el).getPropertyValue(attr));
         }
         function replaceRects(layerElement) {
             const resolver = function (prefix) {
@@ -651,8 +645,6 @@ function redrawCellGrid(curlevel) {
             }
             const allRects = document.evaluate('svg:rect', layerElement, resolver, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
             const wallcolor = allRects.snapshotItem(1).getAttribute("fill");
-            const [rb, gb, bb ] = getColor(allRects.snapshotItem(0), "fill");	
-            const [rf, gf, bf] = getColor(allRects.snapshotItem(1), "fill");
             const result = document.evaluate('svg:rect[@fill="' + wallcolor + '"]', layerElement, resolver, XPathResult.ORDERED_NODE_ITERATOR_TYPE, null);
             const pointlists = [];
             let rect;
@@ -672,16 +664,11 @@ function redrawCellGrid(curlevel) {
                 for (let col = 0; col < width; col++) {
                     const point = pointlists[pointidx];
                     if (point.y === row && point.x === col) {
-                        arr[i + 0] = rf; // R value
-                        arr[i + 1] = gf; // G value
-                        arr[i + 2] = bf; // B value
+                        arr.set(getColor(allRects.snapshotItem(1), "fill"), i);
                         pointidx++;
                     } else {
-                        arr[i + 0] = rb; // R value
-                        arr[i + 1] = gb; // G value
-                        arr[i + 2] = bb; // B value
+                        arr.set(getColor(allRects.snapshotItem(0), "fill"), i);
                     }
-                    arr[i + 3] = 255; // A value 
                     i += 4;
                 }
             }

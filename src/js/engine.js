@@ -633,6 +633,7 @@ function loadLevelFromLevelDat(state,leveldat,randomseed,clearinputhistory) {
   	rightdragging = false;
   	state.metadata = deepClone(state.default_metadata);
     againing=false;
+	svg.replaceChildren();
     if (leveldat===undefined) {
     	consolePrint("Trying to access a level that doesn't exist.",true);
 		goToTitleScreen();
@@ -3082,6 +3083,7 @@ function procInp(dir,dontDoWin,dontModify,bak,coord) {
 			}
 			consolePrint('Applying rules.');
 		}
+		redrawn = false;
 		
         var bannedGroup = [];
 

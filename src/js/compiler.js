@@ -3716,6 +3716,10 @@ function compile(command, text, randomseed) {
     }
 
     if (state) { //otherwise error
+        const parser = new DOMParser();
+        state.svgelement = parser.parseFromString(state.svgsource, "text/html").body.firstElementChild;
+        delete state.svgsource;
+
         setGameState(state, command, randomseed);
         clearInputHistory();
     }

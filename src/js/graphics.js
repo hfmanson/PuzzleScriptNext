@@ -29,6 +29,21 @@ function createTextSprite(name, text, colors, scale) {
     return canvas;
 }
 
+// Create and return a graphic SVG sprite canvas
+function createUnscaledSprite(name,spritegrid, colors, size) {
+    if (!colors || colors.length === 0)	colors = [state.bgcolor, state.fgcolor];
+
+	var canvas = makeSpriteCanvas(name);
+	var context = canvas.getContext('2d');
+
+    canvas.width = spritegrid.reduce((acc, row) => Math.max(acc, row.length), 0);
+    canvas.height = spritegrid.length;
+
+    renderUnscaledSprite(context, spritegrid, colors, 0, 0, 0, size);
+
+    return canvas;
+}
+
 // Create and return a custom instructions sprite canvas
 function createJsonSprite(name, vector) {
     const canvas = makeSpriteCanvas(name);
@@ -136,6 +151,42 @@ function renderSprite(context, spritegrid, colors, padding, x, y, size) {
     });
 }
 
+// https://stackoverflow.com/a/78521307/433626
+function parseCssColor(str) {
+    canvas.style.color = str;
+    const res = getComputedStyle(canvas).color.match(/[\.\d]+/g).map(Number);
+    if (res.length > 3) {
+        // adjust opacity range from 0 to 1 to 0 to 255        
+        res[3] = res[3] === 1.0 ? 255 : Math.round(res[3] * 256);
+    } else {
+        // opaque opacity
+        res.push(255);
+    }
+    return res;
+}
+
+function renderUnscaledSprite(context, spritegrid, colors, padding, x, y, size) {
+    const width = spritegrid[0].length;
+    const height = spritegrid.length;
+    const arr = new Uint8ClampedArray(width * height * 4);
+
+    let i = 0;
+    for (row of spritegrid) {
+        for (col of row) {
+            if (col >= 0) {
+                arr.set(parseCssColor(colors[col]), i);
+            }       
+            i += 4;
+        }
+    }
+
+    // Initialize a new ImageData object
+    const imageData = new ImageData(arr, width, height);
+
+    // Draw image data to the canvas
+    context.putImageData(imageData, 0, 0);
+}
+
 function drawTextWithFont(ctx, text, color, x, y, height) {
     const fontSize = state.metadata.font_size ? Math.max(0, parseFloat(state.metadata.font_size)) : 1;
     const pixelsize = height * fontSize;
@@ -179,7 +230,8 @@ function regenText() {
 
 var editor_s_grille=[[0,1,1,1,0],[1,0,0,0,0],[0,1,1,1,0],[0,0,0,0,1],[0,1,1,1,0]];
 
-var spriteImages;
+var spriteImages = [];
+var svgImages = [];
 
 function createVectorSprite(name, vector) {
     return vector.type === 'canvas' ? createJsonSprite(name, vector)
@@ -187,9 +239,14 @@ function createVectorSprite(name, vector) {
     : null;
 }
 
-function regenSpriteImages() {
+async function regenSpriteImages() {
 	if (textMode) {
         spriteImages = [];
+        svgImages.forEach((svgImage) => {
+            console.log("freeing blob: " + svgImage.url);
+            URL.revokeObjectURL(svgImage.url);
+        });
+        svgImages = [];
 		regenText();
 		return;
 	} 
@@ -203,23 +260,41 @@ function regenSpriteImages() {
     }
     spriteImages = [];
     
-    objectSprites.forEach((s,i) => {
+    let i = 0;
+    for (const s of objectSprites) {
         if (s && isAbstractObject(s)) {
             spriteImages[i] =
                 s.text ? createTextSprite('t' + s.text, s.text, s.colors, s.scale)
+                : state.svgelement ? createUnscaledSprite(i.toString(), s.dat, s.colors, state.sprite_size)
                 : s.vector ? createVectorSprite(i.toString(), s.vector)
                 : createSprite(i.toString(), s.dat, s.colors, state.sprite_size);
         }
-    });
-
-    objectSprites.forEach((s,i) => {
+        i++;
+    }
+    i = 0;
+    for (const s of objectSprites) {
         if (s && !isAbstractObject(s)) {
             spriteImages[i] =
                 s.text ? createTextSprite('t' + s.text, s.text, s.colors, s.scale)
+                : state.svgelement ? createUnscaledSprite(i.toString(), s.dat, s.colors, state.sprite_size)
                 : s.vector ? createVectorSprite(i.toString(), s.vector)
                 : createSprite(i.toString(), s.dat, s.colors, state.sprite_size);
+            if (state.svgelement && !s.vector && !s.text) {
+                const blob = await new Promise(resolve => spriteImages[i].toBlob(resolve));
+                const width = s.dat[0].length;
+                const height = s.dat.length;
+            
+                const svgImage = {
+                    width: width / state.sprite_size,
+                    height: height / state.sprite_size,
+                    url: URL.createObjectURL(blob)
+                };
+                svgImages[i] = svgImage;
+                console.log("svgImages[" + i + "].url = " + svgImages[i].url);
+            }
         }
-    });
+        i++;
+    }
 
     if (canOpenEditor) {
     	generateGlyphImages();
@@ -281,7 +356,9 @@ function generateGlyphImages() {
 				if (id===-1) {
 					continue;
                 }
+                if (spriteImages[id]) {
 				spritectx.drawImage(spriteImages[id], 0, 0);
+			}
 			}
 			glyphImages.push(sprite);
 		}
@@ -395,6 +472,7 @@ function generateGlyphImages() {
 var canvas;
 var ctx;
 
+var svg;
 
 var x;
 var y;
@@ -408,6 +486,8 @@ let pixelSize;
 window.addEventListener('resize', (e) => canvasResize(), false);
 canvas = document.getElementById('gameCanvas');
 ctx = canvas.getContext('2d');
+svg = document.getElementById('SVGCanvas');
+
 x = 0;
 y = 0;
 
@@ -416,15 +496,32 @@ function glyphCount() {
     return state.glyphOrder.filter(g => g.length == 1).length;
 }
 
+var redrawn = false;
 function redraw() {
     if (cellwidth===0||cellheight===0) {
         return;
     }
     if (debugSwitch.includes('perf')) console.log(`Redraw: ${JSON.stringify(perfCounters)}`);
 
-    if (textMode)
-        redrawTextMode();
-    else redrawCellGrid(curLevel);
+    if (state.svgelement) {
+        if (textMode) {
+            canvas.setAttribute("style", "display: block");
+            svg.setAttribute("style", "display: none");    
+            redrawTextMode();
+            redrawn = false;
+        } else if (!redrawn) {
+            canvas.setAttribute("style", "display: none");
+            svg.setAttribute("style", "display: block; background: " + state.bgcolor);
+            redrawCellGrid(curLevel);
+            redrawn = true;
+        }    
+    } else {
+        if (textMode) {
+            redrawTextMode();
+        } else  {
+            redrawCellGrid(curLevel);
+        }
+    }
 }
 
 // option to draw custom font text in cells could be a prelude setting if desired
@@ -484,7 +581,7 @@ function redrawCellGrid(curlevel) {
     }
     ctx.fillStyle = state.bgcolor;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-
+    svg.setAttribute("viewBox", "0 0 " + curlevel.width + " " + curlevel.height);
     let minMaxIJ = [ 0, 0, screenwidth, screenheight ];
 
     var cameraOffset = {
@@ -608,7 +705,8 @@ function redrawCellGrid(curlevel) {
             };
             return {
                 x: xoffset + (ij.x - this.minMax[0]-cameraOffset.x) * cellwidth + offs.x * ~~(cellwidth / state.sprite_size),
-                y: yoffset + (ij.y - this.minMax[1]-cameraOffset.y) * cellheight + offs.y * ~~(cellheight / state.sprite_size)
+                y: yoffset + (ij.y - this.minMax[1]-cameraOffset.y) * cellheight + offs.y * ~~(cellheight / state.sprite_size),
+                xy: ij
             };
 
         }
@@ -623,7 +721,11 @@ function redrawCellGrid(curlevel) {
         setClip(render);
     if (tweening) 
         drawObjectsTweening(render.getIter());
-    else drawObjects(render);
+    else if (state.svgelement) {
+        drawObjectsSvg(render);
+    } else {
+        drawObjects(render);
+    }
 
     if (state.metadata.status_line)
         drawTextWithFont(ctx, statusText, state.fgcolor, 
@@ -720,6 +822,131 @@ function redrawCellGrid(curlevel) {
                         ctx.setTransform(1, 0, 0, 1, 0, 0);
                     }
                 }
+            }
+        }
+    } 
+
+    function drawObjectsSvg(render) {
+        const namespaces = {
+			"svg": "http://www.w3.org/2000/svg",
+            "xlink": "http://www.w3.org/1999/xlink"
+		};
+        function getColor(el, attr) {
+            return parseCssColor(getComputedStyle(el).getPropertyValue(attr));
+        }
+        function replaceRects(layerElement) {
+            const resolver = function (prefix) {
+                return namespaces[prefix];
+            }
+            const allRects = document.evaluate('svg:rect', layerElement, resolver, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+            if (allRects.snapshotLength < 2) {
+                return;
+            }
+            const wallcolor = allRects.snapshotItem(1).getAttribute("fill");
+            const result = document.evaluate('svg:rect[@fill="' + wallcolor + '"]', layerElement, resolver, XPathResult.ORDERED_NODE_ITERATOR_TYPE, null);
+            const pointlists = [];
+            let rect;
+            while (rect = result.iterateNext()) {
+                pointlists.push(
+                    {
+                        "x": parseInt(rect.getAttribute("x")),
+                        "y": parseInt(rect.getAttribute("y"))
+                    });
+            }
+            const width = svg.viewBox.baseVal.width;
+            const height = svg.viewBox.baseVal.height;
+            const arr = new Uint8ClampedArray(width * height * 4);
+            let i = 0;
+            let pointidx = 0;
+            for (let row = 0; row < height; row++) {
+                for (let col = 0; col < width; col++) {
+                    const point = pointlists[pointidx];
+                    if (point.y === row && point.x === col) {
+                        arr.set(getColor(allRects.snapshotItem(1), "fill"), i);
+                        pointidx++;
+                    } else {
+                        arr.set(getColor(allRects.snapshotItem(0), "fill"), i);
+                    }
+                    i += 4;
+                }
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const context = canvas.getContext('2d');
+            // Initialize a new ImageData object
+            const imageData = new ImageData(arr, width, height);
+
+            // Draw image data to the canvas
+            context.putImageData(imageData, 0, 0);
+            const url = canvas.toDataURL();
+            console.log(url);
+            const image = document.createElementNS(namespaces.svg, "image");
+            image.setAttributeNS(namespaces.xlink, "href", url);
+            for (i = 0; i < allRects.snapshotLength; i++) {
+                layerElement.removeChild(allRects.snapshotItem(i));
+            }
+            layerElement.prepend(image);
+        }
+        const svg_prefix = '<svg xmlns="' + namespaces.svg + '" xmlns:xlink="' + namespaces.xlink + '">';
+        const svg_postfix = '</svg>';
+        function appendSVG(g, source, xy) {
+            const doc = parser.parseFromString(svg_prefix + source + svg_postfix, "application/xml");
+            const el = doc.documentElement.firstElementChild;
+            el.setAttribute("x", xy.x);
+            el.setAttribute("y", xy.y);
+            const el2 = document.importNode(el);
+            el2.addEventListener("load", (e) => {
+                const href = e.target.getAttributeNS(namespaces.xlink, "href");
+                console.log("blob loaded: " + href);
+            }, false);
+            g.appendChild(el2);
+        }
+
+        if (svg.childElementCount == 0) {
+            const newsvg = document.importNode(state.svgelement, true);
+            svg.append(...newsvg.childNodes);
+        }
+        
+        const parser = new DOMParser();
+
+        // draw each group of objects in all the places they occur, in specified order
+        for (const group of state.collisionLayerGroups) {
+            let layerElement = document.getElementById('layer' + group.layer);
+            if (!layerElement) {
+                layerElement = document.createElementNS(namespaces.svg, "g");
+                layerElement.setAttribute("id", 'layer' + group.layer);
+                svg.append(layerElement);
+            } else if (group.layer === 0) {
+                continue;
+            } else {
+                layerElement.replaceChildren();
+            }
+            for (const posindex of render.getPosIndexes(group)) {
+                const posmask = curlevel.getCellInto(posindex,_o12);    
+                for (let k = group.firstObjectNo; k < group.firstObjectNo + group.numObjects; ++k) {
+                    const animate = (isAnimating) ? seedsToAnimate[posindex+','+k] : null;
+                    if (posmask.get(k) || animate) {
+                        const obj = state.objects[state.idDict[k]];
+                        if (showLayers && obj.layer != showLayerNo)
+                            continue;
+                        const drawpos = render.getDrawPos(posindex, obj);
+                        
+                        const vector = obj.vector;
+                        if (vector) {
+                            if (vector.type === 'svg') {
+                                appendSVG(layerElement, obj.vector.data[0], drawpos.xy);
+                            }                
+                        } else {
+                            //const imgURL = spriteImages[k].toDataURL("image/png");
+                            drawpos.xy.y += 1 - svgImages[k].height;
+                            appendSVG(layerElement, '<image width="' + svgImages[k].width + 'px" height="' + svgImages[k].height + 'px" xlink:href="' + svgImages[k].url + '"/>', drawpos.xy);
+                        }
+                    }
+                }
+            }
+            if (group.layer === 0) {
+                replaceRects(layerElement);
             }
         }
     } 
@@ -1055,10 +1282,12 @@ var textcellheight = 0;
 let statusLineHeight = 0;
 
 // recalculate screen layout and then call redraw
-function canvasResize(level) {
+async function canvasResize(level) {
     level ||= curLevel;
     canvas.width = canvas.parentNode.clientWidth;
     canvas.height = canvas.parentNode.clientHeight;
+    svg.setAttribute("width", svg.parentNode.clientWidth);
+    svg.setAttribute("height", svg.parentNode.clientHeight);
 
     screenwidth = level.width;        // board size, used to calculate cell size
     screenheight = level.height;
@@ -1142,7 +1371,8 @@ function canvasResize(level) {
     
     if (oldcellwidth!=cellwidth||oldcellheight!=cellheight||oldtextmode!=textMode||textMode||oldfgcolor!=state.fgcolor||forceRegenImages){
     	forceRegenImages=false;
-    	regenSpriteImages();
+    	await regenSpriteImages();
+        console.log("blobs loaded");
     }
 
     oldcellheight=cellheight;
